@@ -1,0 +1,2 @@
+# Smart_night_light
+使用Android APP透過WiFi控制小夜燈的開關以及自動收集周圍的環境狀況。
