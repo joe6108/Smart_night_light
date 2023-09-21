@@ -1,0 +1,145 @@
+#include <WiFi.h>
+#include <SimpleDHT.h>
+#include <ArduinoJson.h>
+
+// DHT11设置
+int pinDHT11 = 15; // ESP32 GPIO15
+SimpleDHT11 dht11;
+
+// WiFi设置
+const char* ssid = "Y170772";     // WiFi名称
+const char* password = "23091829"; // WiFi密码
+
+// 端口号
+const int serverPort = 80;
+
+WiFiServer server(serverPort);
+
+void setup()
+{
+  // 初始化串口
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  delay(10);
+
+  // 连接WiFi网络
+  connectToWiFi();
+
+  // 启动服务器
+  server.begin();
+
+  Serial.println("Server started.");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop()
+{
+  handleClientRequests();
+}
+
+void connectToWiFi()
+{
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void handleClientRequests()
+{
+  WiFiClient client = server.available(); // 监听是否有客户端连接
+
+  if (client) {
+    Serial.println("New Client."); // 通知有新客户端连接
+
+    String currentLine = ""; // 用于存储客户端的数据
+
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        Serial.write(c);
+
+        if (c == '\n') {
+          if (currentLine.length() == 0) {
+            // HTTP请求结束
+            handleHttpRequest(client, currentLine);
+            break;
+          } else {
+            currentLine = "";
+          }
+        } else if (c != '\r') {
+          currentLine += c;
+        }
+      }
+    }
+
+    client.stop();
+    Serial.println("Client Disconnected.");
+  }
+}
+
+void handleHttpRequest(WiFiClient& client, const String& request)
+{
+  if (request.endsWith("GET /H")) {
+    digitalWrite(LED_BUILTIN, HIGH); // GET /H turns the LED on
+  } else if (request.endsWith("GET /L")) {
+    digitalWrite(LED_BUILTIN, LOW); // GET /L turns the LED off
+  } else if (request.endsWith("GET /GET")) {
+    sendTemperatureAndHumidity(client);
+  } else {
+    sendDefaultResponse(client);
+  }
+}
+
+void sendTemperatureAndHumidity(WiFiClient& client)
+{
+  byte temperature = 0;
+  byte humidity = 0;
+  int err = SimpleDHTErrSuccess;
+
+  Serial.println("=================================");
+
+  if ((err = dht11.read(pinDHT11, &temperature, &humidity, NULL)) != SimpleDHTErrSuccess) {
+    Serial.print("Read DHT11 failed, err=");
+    Serial.println(err);
+    delay(1000);
+    return;
+  }
+
+  StaticJsonDocument<200> doc;
+  doc["temperature"] = temperature;
+  doc["humidity"] = humidity;
+
+  String json;
+  serializeJson(doc, json);
+
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: application/json");
+  client.println("Connection: close");
+  client.print("Content-Length: ");
+  client.println(json.length());
+  client.println();
+  client.print(json);
+}
+
+void sendDefaultResponse(WiFiClient& client)
+{
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-type:text/html");
+  client.println();
+  client.print("Click <a href=\"/H\">here</a> to turn the LED on pin 5 on.<br>");
+  client.print("Click <a href=\"/L\">here</a> to turn the LED on pin 5 off.<br>");
+  client.print("Click <a href=\"/GET\">here</a> to get temperature and humidity values in json format.<br>");
+}
